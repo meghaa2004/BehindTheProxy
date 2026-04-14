@@ -1,0 +1,10 @@
+requests
+colorama
+bs4
+cryptography
+Flask
+Flask-CORS
+dnspython
+python-whois
+geoip2
+maxminddb-geolite2

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>BehindTheProxy - Advanced Recon Tool</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+    <div class="background"></div>
+
+
+    <div class="container">
+
+        <!-- Header -->
+
+        <header class="header">
+
+            <div class="header-content">
+
+                <h1 class="title">🕵️ BehindTheProxy</h1>
+                <p class="subtitle">Advanced OSINT & Infrastructure Reconnaissance Tool</p>
+
+            </div>
+
+        </header>
+
+
+
+        <!-- Main Content -->
+
+        <main class="main-content">
+
+            <!-- Input Section -->
+
+            <section class="input-section card">
+                <div class="input-section-header">
+                    <div>
+                        <h2>Reconnaissance Target</h2>
+                        <p class="input-subtitle">Enter a domain to begin analysis</p>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <input 
+                        type="text" 
+                        id="domainInput" 
+                        class="input-field" 
+                        placeholder="Enter domain (e.g., example.com or https://example.com)"
+                        autocomplete="off"
+                    >
+
+                    <button class="btn btn-primary" onclick="runAllScans()">🚀 Run All Scans</button>
+                    <button class="btn btn-secondary" onclick="resetAnalysis()">🔄 Clear</button>
+
+                </div>
+
+                <div id="analysisStatus" class="status-message"></div>
+
+            </section>
+
+            <!-- Scan Options: individual scans listed as buttons -->
+
+            <section id="quickActionsSection" class="card quick-actions-section">
+
+                <h3>📂 Scan Options</h3>
+
+                <p class="section-subtitle">Click any specific scan button below to run that check for the entered domain</p>
+
+
+                <div class="quick-actions-grid">
+
+
+                    <!-- Enhanced Progress Panel: Hybrid View -->
+                    <div id="progressPanel" class="progress-panel-hybrid" style="grid-column: 1 / -1; margin-bottom: 20px;">
+                        <!-- Overall Progress Bar -->
+                        <div class="progress-header">
+                            <h4>📊 Scan Progress</h4>
+                            <span id="progressPercentageLabel" class="progress-percentage">0%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div id="progressBar" class="progress-bar-fill"></div>
+                        </div>
+                        <div class="progress-counter">
+                            <span class="counter completed">✓ <span id="completedCount">0</span></span>
+                            <span class="counter running">⏳ <span id="runningCount">0</span></span>
+                            <span class="counter pending">○ <span id="pendingCount">0</span></span>
+                            <span class="counter failed">✗ <span id="failedCount">0</span></span>
+                        </div>
+                        
+                        <!-- Scan Checklist -->
+                        <div class="scan-checklist">
+                            <h5>Scans</h5>
+                            <div id="scanChecklistItems" class="checklist-items">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                        
+                        <!-- Live Activity Log -->
+                        <div class="activity-log">
+                            <div class="activity-log-header">
+                                <h5>Activity Log</h5>
+                                <button class="btn-toggle-log" id="toggleLogBtn" onclick="toggleActivityLog()">▼ Collapse</button>
+                            </div>
+                            <div id="activityLogItems" class="log-items" data-expanded="true">
+                                <div class="log-item log-info">Ready to scan. Enter a domain to begin.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h4>🏗️ Infrastructure</h4>
+                    <button class="btn btn-category" onclick="scanSpecific('infrastructure','dns')">DNS Records</button>
+                    <button class="btn btn-category" onclick="scanSpecific('infrastructure','whois')">WHOIS</button>
+                    <button class="btn btn-category" onclick="scanSpecific('infrastructure','ports')">Port Scan</button>
+                    <button class="btn btn-category" onclick="scanSpecific('infrastructure','geolocation')">Geolocation</button>
+                    <button class="btn btn-category" onclick="scanSpecific('infrastructure','cdn')">CDN Detection</button>
+
+
+                    <h4>🔒 Security</h4>
+                    <button class="btn btn-category" onclick="scanSpecific('security','headers')">Security Headers</button>
+                    <button class="btn btn-category" onclick="scanSpecific('security','ssl')">SSL Certificate</button>
+                    <button class="btn btn-category" onclick="scanSpecific('security','waf')">WAF Detection</button>
+                    <button class="btn btn-category" onclick="scanSpecific('security','email')">Email Security</button>
+                    <button class="btn btn-category" onclick="scanSpecific('security','http')">HTTP Security</button>
+
+
+                    <h4>⚙️ Technology</h4>
+                    <button class="btn btn-category" onclick="scanSpecific('technology','technologies')">Detect Technologies</button>
+                    <button class="btn btn-category" onclick="scanSpecific('technology','versions')">Framework Versions</button>
+                    <button class="btn btn-category" onclick="scanSpecific('technology','metadata')">Metadata</button>
+                    <button class="btn btn-category" onclick="scanSpecific('technology','http_methods')">HTTP Methods</button>
+
+
+                    <h4>📄 Content</h4>
+                    <button class="btn btn-category" onclick="scanSpecific('content','links')">Links</button>
+                    <button class="btn btn-category" onclick="scanSpecific('content','paths')">Common Paths</button>
+                    <button class="btn btn-category" onclick="scanSpecific('content','robots')">Robots.txt</button>
+                    <button class="btn btn-category" onclick="scanSpecific('content','sitemap')">Sitemap.xml</button>
+                    <button class="btn btn-category" onclick="scanSpecific('content','secrets')">Secrets & Comments</button>
+
+
+                    <h4>⚡ Performance</h4>
+                    <button class="btn btn-category" onclick="scanSpecific('performance','timing')">Response Timing</button>
+                    <button class="btn btn-category" onclick="scanSpecific('performance','cookies')">Cookies</button>
+                    <button class="btn btn-category" onclick="scanSpecific('performance','dns_propagation')">DNS Propagation</button>
+
+                </div>
+
+            </section>
+
+            <!-- Results Section -->
+
+            <section id="resultsSection" class="results-section" style="display: none;">
+
+                <div class="results-header">
+                    <h2 id="resultsTitle">📊 Scan Results</h2>
+                    <div class="results-actions">
+                        <button class="btn btn-danger" onclick="resetAnalysis()">🔄 New Scan</button>
+                    </div>
+                </div>
+                <!-- Scan Results Container (CATEGORY RESULTS APPEAR HERE) -->
+                <div id="scanResultsContainer" class="scan-results-container">
+                </div>
+            </section>
+
+            <!-- Empty State -->
+
+            <section id="emptyState" class="empty-state">
+
+                <div class="empty-icon">🔐</div>
+                <h3>Advanced Infrastructure Reconnaissance</h3>
+                <p>Enter a domain to begin comprehensive analysis</p>
+
+            </section>
+
+        </main>
+
+
+
+        <!-- Footer -->
+
+        <footer class="footer">
+
+            <p>BehindTheProxy | Advanced OSINT Tool | Use responsibly</p>
+
+        </footer>
+
+    </div>
+
+    <!-- Progress Modal -->
+    <div id="progressModal" class="progress-modal">
+        <div class="progress-modal-content">
+            <div class="progress-modal-header">
+                <h2>Scan in Progress</h2>
+                <span id="scanTimeElapsed">0s</span>
+            </div>
+            <div class="progress-modal-body">
+                <div class="progress-spinner"></div>
+                <p id="progressMessage">Starting scan...</p>
+                <div class="progress-modal-bar-container">
+                    <div id="modalProgressBar" class="progress-modal-bar"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script>
+        // Fallback if jsDelivr fails
+        if (typeof XLSX === 'undefined') {
+            var xlsxFallback = document.createElement('script');
+            xlsxFallback.src = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+            xlsxFallback.onerror = function() {
+                console.warn('XLSX library failed to load from both CDNs');
+            };
+            document.head.appendChild(xlsxFallback);
+        }
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+</body>
+
+</html>
