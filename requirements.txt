@@ -2,6 +2,7 @@ requests
 colorama
 bs4
 cryptography
+pyOpenSSL
 Flask
 Flask-CORS
 dnspython

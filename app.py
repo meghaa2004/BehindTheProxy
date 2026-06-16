@@ -51,15 +51,25 @@ def detect_web_server(domain):
 def get_ssl_certificate_info(host):
     try:
         context = ssl.create_default_context()
-        with context.wrap_socket(socket.socket(), server_hostname=host) as sock:
+        sock_raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock_raw.settimeout(5.0)
+        with context.wrap_socket(sock_raw, server_hostname=host) as sock:
             sock.connect((host, 443))
             certificate_der = sock.getpeercert(True)
             certificate = x509.load_der_x509_certificate(certificate_der, default_backend())
             
-            common_name = certificate.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
-            issuer = certificate.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value
-            validity_start = certificate.not_valid_before_utc
-            validity_end = certificate.not_valid_after_utc
+            cn_attrs = certificate.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+            common_name = cn_attrs[0].value if cn_attrs else "Unknown"
+            
+            issuer_attrs = certificate.issuer.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+            issuer = issuer_attrs[0].value if issuer_attrs else "Unknown"
+            
+            try:
+                validity_start = certificate.not_valid_before_utc
+                validity_end = certificate.not_valid_after_utc
+            except AttributeError:
+                validity_start = certificate.not_valid_before
+                validity_end = certificate.not_valid_after
             
             return {
                 "Common Name": str(common_name),
@@ -109,56 +119,45 @@ def get_domain_historical_ip_address(domain):
     except Exception as e:
         return []
 
-def find_subdomains_with_ssl_analysis(domain, wordlist_path="wordlist.txt", timeout=10):
+def find_subdomains_with_ssl_analysis(domain, wordlist_path="wordlist.txt", timeout=3):
     subdomains_found = []
     subdomains_lock = threading.Lock()
-    
-    def check_subdomain(subdomain):
-        subdomain_url = f"https://{subdomain}.{domain}"
-        try:
-            response = requests.get(subdomain_url, timeout=timeout)
-            if response.status_code == 200:
-                with subdomains_lock:
-                    subdomains_found.append(subdomain_url)
-        except requests.exceptions.RequestException:
-            pass
     
     if not os.path.exists(wordlist_path):
         wordlist_path = "wordlist.txt"
     
     try:
         with open(wordlist_path, "r") as file:
-            subdomains = [line.strip() for line in file.readlines()]
+            subdomains = [line.strip() for line in file.readlines() if line.strip() and not line.startswith('#')]
     except:
-        return []
+        return {"error": "Failed to read wordlist"}
     
-    threads = []
-    for subdomain in subdomains:
-        thread = threading.Thread(target=check_subdomain, args=(subdomain,))
-        threads.append(thread)
-        thread.start()
+    from concurrent.futures import ThreadPoolExecutor
     
-    for thread in threads:
-        thread.join()
-    
-    real_ips = []
-    for subdomain in subdomains_found:
-        subdomain_parts = subdomain.split('//')
-        if len(subdomain_parts) > 1:
-            host = subdomain_parts[1]
-            real_ip = get_real_ip(host)
+    def check_subdomain(sub):
+        host = f"{sub}.{domain}"
+        try:
+            real_ip = socket.gethostbyname(host)
             if real_ip:
                 ssl_info = get_ssl_certificate_info(host)
-                real_ips.append({
-                    "host": host,
-                    "ip": real_ip,
-                    "ssl_info": ssl_info
-                })
+                with subdomains_lock:
+                    subdomains_found.append({
+                        "host": host,
+                        "ip": real_ip,
+                        "ssl_info": ssl_info
+                    })
+        except socket.gaierror:
+            pass
+        except Exception:
+            pass
+            
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        executor.map(check_subdomain, subdomains)
     
     return {
         "total_scanned": len(subdomains),
         "total_found": len(subdomains_found),
-        "results": real_ips
+        "results": subdomains_found
     }
 
 # ========== NEW RECON FUNCTIONS ==========
@@ -201,22 +200,30 @@ def scan_common_ports(host, ports=None):
         ports = [21, 22, 25, 53, 80, 110, 143, 443, 465, 587, 993, 995, 3306, 3389, 5432, 5900, 8080, 8443, 9000]
     
     open_ports = []
-    for port in ports:
+    open_ports_lock = threading.Lock()
+    
+    from concurrent.futures import ThreadPoolExecutor
+    
+    def scan_port(port):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
+            sock.settimeout(1.0)
             result = sock.connect_ex((host, port))
             if result == 0:
                 try:
                     service = socket.getservbyport(port)
-                    open_ports.append({"port": port, "service": service})
                 except:
-                    open_ports.append({"port": port, "service": "unknown"})
+                    service = "unknown"
+                with open_ports_lock:
+                    open_ports.append({"port": port, "service": service})
             sock.close()
         except:
             pass
+            
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        executor.map(scan_port, ports)
     
-    return open_ports
+    return sorted(open_ports, key=lambda x: x['port'])
 
 def detect_technologies(domain):
     """Detect CMS, frameworks, and technologies"""
@@ -326,32 +333,51 @@ def reverse_dns_lookup(ip):
 def get_ssl_certificate_chain(host):
     """Get full SSL certificate chain"""
     try:
-        context = ssl.create_default_context()
-        with context.wrap_socket(socket.socket(), server_hostname=host) as sock:
-            sock.connect((host, 443))
-            certs = sock.getpeercert_chain()
-            
-            cert_chain = []
-            for cert_der in certs:
-                cert = x509.load_der_x509_certificate(cert_der, default_backend())
+        from OpenSSL import SSL
+        import socket
+        
+        context = SSL.Context(SSL.TLS_CLIENT_METHOD)
+        context.set_verify(SSL.VERIFY_NONE)
+        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
+        connection = SSL.Connection(context, sock)
+        connection.set_tlsext_host_name(host.encode('utf-8'))
+        connection.connect((host, 443))
+        connection.do_handshake()
+        
+        certs = connection.get_peer_cert_chain()
+        cert_chain = []
+        if certs:
+            for cert in certs:
+                subject = cert.get_subject()
+                issuer = cert.get_issuer()
+                
+                subject_cn = next((val.decode('utf-8') for name, val in subject.get_components() if name == b'CN'), "Unknown")
+                issuer_cn = next((val.decode('utf-8') for name, val in issuer.get_components() if name == b'CN'), "Unknown")
+                
+                not_before = cert.get_notBefore()
+                not_after = cert.get_notAfter()
+                valid_from = not_before.decode('utf-8') if not_before else "Unknown"
+                valid_to = not_after.decode('utf-8') if not_after else "Unknown"
+                
                 alt_names = []
-                try:
-                    san_ext = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-                    alt_names = [str(name.value) for name in san_ext.value]
-                except:
-                    pass
+                for i in range(cert.get_extension_count()):
+                    ext = cert.get_extension(i)
+                    if ext.get_short_name() == b'subjectAltName':
+                        alt_names_str = str(ext)
+                        alt_names = [name.strip() for name in alt_names_str.split(',')]
                 
                 cert_chain.append({
-                    "subject": str(cert.subject),
-                    "issuer": str(cert.issuer),
-                    "valid_from": str(cert.not_valid_before_utc),
-                    "valid_to": str(cert.not_valid_after_utc),
+                    "subject": f"CN={subject_cn}",
+                    "issuer": f"CN={issuer_cn}",
+                    "valid_from": valid_from,
+                    "valid_to": valid_to,
                     "alternative_names": alt_names
                 })
-            
-            return cert_chain
-    except:
-        return []
+        return cert_chain
+    except Exception as e:
+        return [{"error": str(e)}]
 
 def get_asn_info(ip):
     """Get ASN and network information"""
@@ -554,7 +580,7 @@ def parse_sitemap(domain):
     try:
         response = requests.get(f"https://{domain}/sitemap.xml", timeout=5)
         if response.status_code == 200:
-            soup = BeautifulSoup(response.content, 'xml')
+            soup = BeautifulSoup(response.content, 'html.parser')
             for url in soup.find_all('url')[:50]:
                 loc = url.find('loc')
                 if loc:
@@ -604,17 +630,24 @@ def enumerate_common_paths(domain):
     ]
     
     found_paths = []
+    found_paths_lock = threading.Lock()
     
-    for path in common_paths:
+    from concurrent.futures import ThreadPoolExecutor
+    
+    def check_path(path):
         try:
             response = requests.head(f"https://{domain}{path}", timeout=3, allow_redirects=False)
             if response.status_code != 404:
-                found_paths.append({
-                    'path': path,
-                    'status': response.status_code
-                })
+                with found_paths_lock:
+                    found_paths.append({
+                        'path': path,
+                        'status': response.status_code
+                    })
         except:
             pass
+            
+    with ThreadPoolExecutor(max_workers=15) as executor:
+        executor.map(check_path, common_paths)
     
     return found_paths
 
@@ -658,31 +691,73 @@ def check_spf_dkim_dmarc(domain):
 
 def check_cdn_and_proxies(domain):
     """Detect CDN, proxies, and cloaking services"""
-    cdn_info = {}
+    cdn_info = {'detected_cdn': 'None', 'ip': None}
     
     try:
-        ip = socket.gethostbyname(domain)
-        
-        # Popular CDN IP ranges (simplified check)
-        cdns = {
-            'Cloudflare': ['1.0.0', '103.21', '103.22', '104.16'],
-            'Akamai': ['184.84', '184.85', '2.16', '2.17'],
-            'Fastly': ['151.101', '23.235'],
-            'AWS CloudFront': ['52.84', '52.85'],
-            'Azure CDN': ['13.107', '13.109'],
-            'Google CDN': ['34.64', '34.65']
-        }
-        
-        for cdn_name, prefixes in cdns.items():
-            if any(ip.startswith(prefix) for prefix in prefixes):
-                cdn_info['detected_cdn'] = cdn_name
-                break
-        
-        cdn_info['ip'] = ip
-        
-    except:
+        try:
+            answers = dns.resolver.resolve(domain, 'CNAME')
+            cnames = [str(rdata).lower() for rdata in answers]
+            for cname in cnames:
+                if 'cloudflare' in cname:
+                    cdn_info['detected_cdn'] = 'Cloudflare'
+                    break
+                elif 'cloudfront' in cname:
+                    cdn_info['detected_cdn'] = 'AWS CloudFront'
+                    break
+                elif 'fastly' in cname:
+                    cdn_info['detected_cdn'] = 'Fastly'
+                    break
+                elif 'akamai' in cname:
+                    cdn_info['detected_cdn'] = 'Akamai'
+                    break
+                elif 'azure' in cname:
+                    cdn_info['detected_cdn'] = 'Azure CDN'
+                    break
+        except Exception:
+            pass
+            
+        if cdn_info['detected_cdn'] == 'None':
+            try:
+                response = requests.head(f"https://{domain}", timeout=5)
+                headers = response.headers
+                
+                if 'server' in headers and 'cloudflare' in headers['server'].lower():
+                    cdn_info['detected_cdn'] = 'Cloudflare'
+                elif 'cf-ray' in headers or 'cf-cache-status' in headers:
+                    cdn_info['detected_cdn'] = 'Cloudflare'
+                elif 'x-cache' in headers and 'cloudfront' in headers['x-cache'].lower():
+                    cdn_info['detected_cdn'] = 'AWS CloudFront'
+                elif 'x-amz-cf-id' in headers:
+                    cdn_info['detected_cdn'] = 'AWS CloudFront'
+                elif 'x-fastly-request-id' in headers or 'x-fastly-cache-status' in headers:
+                    cdn_info['detected_cdn'] = 'Fastly'
+                elif 'x-akamai-transformed' in headers or 'x-akamai-request-id' in headers:
+                    cdn_info['detected_cdn'] = 'Akamai'
+                elif 'server' in headers and 'akamai' in headers['server'].lower():
+                    cdn_info['detected_cdn'] = 'Akamai'
+            except Exception:
+                pass
+                
+        try:
+            ip = socket.gethostbyname(domain)
+            cdn_info['ip'] = ip
+            
+            if cdn_info['detected_cdn'] == 'None' and ip:
+                octets = ip.split('.')
+                if len(octets) == 4:
+                    o1, o2 = int(octets[0]), int(octets[1])
+                    if o1 == 104 and (16 <= o2 <= 31):
+                        cdn_info['detected_cdn'] = 'Cloudflare'
+                    elif o1 == 172 and (64 <= o2 <= 71):
+                        cdn_info['detected_cdn'] = 'Cloudflare'
+                    elif o1 == 103 and (o2 == 21 or o2 == 22 or o2 == 31):
+                        cdn_info['detected_cdn'] = 'Cloudflare'
+        except Exception:
+            pass
+            
+    except Exception:
         pass
-    
+        
     return cdn_info
 
 def analyze_response_timing(domain):
@@ -1056,6 +1131,25 @@ def analyze():
     results['historical_ips'] = get_domain_historical_ip_address(domain)
     
     return jsonify(results)
+
+@app.route('/api/scan-subdomains', methods=['POST'])
+def scan_subdomains_endpoint():
+    """Scan for exposed subdomains"""
+    data = request.json or {}
+    domain = data.get('domain', '').strip()
+    
+    if not domain:
+        return jsonify({'error': 'Domain is required'}), 400
+        
+    parsed_url = urlparse(domain)
+    if parsed_url.scheme:
+        domain = parsed_url.netloc
+        
+    try:
+        results = find_subdomains_with_ssl_analysis(domain)
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/version', methods=['GET'])
 def get_version():

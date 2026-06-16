@@ -9,20 +9,38 @@ function addActivityLog(message, type = 'info') {
     const logContainer = document.getElementById('activityLogItems');
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     
+    let iconHtml = '';
+    if (type === 'success') {
+        iconHtml = '<i data-lucide="check-circle" class="log-icon success" style="width:12px; height:12px; margin-right:6px; color:var(--success);"></i>';
+    } else if (type === 'error') {
+        iconHtml = '<i data-lucide="x-circle" class="log-icon error" style="width:12px; height:12px; margin-right:6px; color:var(--danger);"></i>';
+    } else {
+        iconHtml = '<i data-lucide="info" class="log-icon info" style="width:12px; height:12px; margin-right:6px; color:var(--accent);"></i>';
+    }
+
+    let cleanMessage = message
+        .replace(/[🚀❌✓✗🎉→]/g, '')
+        .trim();
+
     const logItem = document.createElement('div');
     logItem.className = `log-item log-${type}`;
+    logItem.style.display = 'flex';
+    logItem.style.alignItems = 'center';
     logItem.innerHTML = `
-        <span class="log-timestamp">[${timestamp}]</span>
-        <span class="log-message">${message}</span>
+        <span class="log-timestamp" style="margin-right:8px;">[${timestamp}]</span>
+        <span style="display:inline-flex; align-items:center;">${iconHtml}</span>
+        <span class="log-message">${cleanMessage}</span>
     `;
     
-    // Prepend to top (reverse chronological with flex-direction: column-reverse)
     logContainer.insertBefore(logItem, logContainer.firstChild);
     
-    // Limit log to 50 items
     const items = logContainer.querySelectorAll('.log-item');
     if (items.length > 50) {
         items[items.length - 1].remove();
+    }
+
+    if (window.lucide) {
+        lucide.createIcons();
     }
 }
 
@@ -35,11 +53,10 @@ function toggleActivityLog() {
     toggleBtn.textContent = logExpanded ? '▼ Collapse' : '▶ Expand';
 }
 
-function initScanChecklist() {
-    const categories = ['infrastructure', 'security', 'technology', 'content', 'performance'];
+function initScanChecklist(items = ['infrastructure', 'security', 'technology', 'content', 'performance']) {
     scanChecklist = {};
     
-    categories.forEach(cat => {
+    items.forEach(cat => {
         scanChecklist[cat] = 'pending';
     });
     
@@ -51,29 +68,33 @@ function updateChecklistDisplay() {
     checklistContainer.innerHTML = '';
     
     const categoryIcons = {
-        'infrastructure': '🏗️',
-        'security': '🔒',
-        'technology': '⚙️',
-        'content': '📄',
-        'performance': '⚡'
+        'infrastructure': '<i data-lucide="server" style="width:14px; height:14px;"></i>',
+        'security': '<i data-lucide="shield" style="width:14px; height:14px;"></i>',
+        'technology': '<i data-lucide="cpu" style="width:14px; height:14px;"></i>',
+        'content': '<i data-lucide="file-code" style="width:14px; height:14px;"></i>',
+        'performance': '<i data-lucide="zap" style="width:14px; height:14px;"></i>'
     };
     
     const statusIcons = {
-        'pending': '○',
-        'running': '⏳',
-        'done': '✓',
-        'error': '✗'
+        'pending': '<i data-lucide="circle" class="icon-pending" style="width:12px; height:12px;"></i>',
+        'running': '<i data-lucide="loader" class="icon-running spinning" style="width:12px; height:12px;"></i>',
+        'done': '<i data-lucide="check-circle" class="icon-success" style="width:12px; height:12px;"></i>',
+        'error': '<i data-lucide="x-circle" class="icon-error" style="width:12px; height:12px;"></i>'
     };
     
     Object.entries(scanChecklist).forEach(([cat, status]) => {
         const item = document.createElement('div');
         item.className = `checklist-item ${status}`;
-        const icon = statusIcons[status];
-        const catIcon = categoryIcons[cat] || '📍';
+        const iconHtml = statusIcons[status];
+        const catIconHtml = categoryIcons[cat] || '<i data-lucide="help-circle"></i>';
         const label = cat.charAt(0).toUpperCase() + cat.slice(1);
-        item.innerHTML = `<span class="checklist-icon">${icon}</span><span>${catIcon} ${label}</span>`;
+        item.innerHTML = `<span class="checklist-icon" style="margin-right:6px; display:inline-flex; align-items:center;">${iconHtml}</span><span style="display:inline-flex; align-items:center; gap:6px;">${catIconHtml} ${label}</span>`;
         checklistContainer.appendChild(item);
     });
+
+    if (window.lucide) {
+        lucide.createIcons();
+    }
 }
 
 function updateChecklistStatus(category, status) {
@@ -90,11 +111,13 @@ document.addEventListener('DOMContentLoaded', function() {
     
     document.getElementById('domainInput').addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
-            // On Enter do nothing by default; user should click a specific scan button
-            // runAllScans on Enter for convenience
             runAllScans();
         }
     });
+
+    if (window.lucide) {
+        lucide.createIcons();
+    }
 });
 
 // Scan category function
@@ -120,6 +143,13 @@ async function scanCategory(category) {
     currentAnalysis = { domain: domainInput, category: category, scanId: Date.now() };
     allResults = {};
 
+    // Initialize progress display for a single category scan
+    initProgressList(1);
+    initScanChecklist([category]);
+    updateChecklistStatus(category, 'running');
+    updateCategoryStatus(category, 'running');
+    addActivityLog(`🚀 Starting ${category} scan on: ${domainInput}`, 'info');
+
     try {
         const response = await fetch(`/api/category/${category}`, {
             method: 'POST',
@@ -132,6 +162,9 @@ async function scanCategory(category) {
         if (!response.ok) {
             const errorData = await response.json();
             showStatus('analysisStatus', `Error: ${errorData.error || 'Unknown error'}`, 'error');
+            updateChecklistStatus(category, 'error');
+            updateCategoryStatus(category, 'error');
+            addActivityLog(`❌ ${category} scan failed: ${errorData.error || 'Unknown error'}`, 'error');
             return;
         }
 
@@ -142,8 +175,14 @@ async function scanCategory(category) {
         displayCategoryResults(category, data);
         showStatus('analysisStatus', `✓ ${category.toUpperCase()} scan completed successfully!`, 'success');
         
+        updateChecklistStatus(category, 'done');
+        updateCategoryStatus(category, 'done');
+        addActivityLog(`✓ ${category} scan completed successfully`, 'success');
     } catch (error) {
         showStatus('analysisStatus', `Error: ${error.message}`, 'error');
+        updateChecklistStatus(category, 'error');
+        updateCategoryStatus(category, 'error');
+        addActivityLog(`❌ ${category} scan error: ${error.message}`, 'error');
         console.error('Scan error:', error);
     }
 }
@@ -163,9 +202,11 @@ async function scanSpecific(category, scanName) {
     document.getElementById('resultsSection').style.display = 'flex';
     currentAnalysis = { domain: domainInput, category: category, scanId: Date.now() };
 
-    // Show progress modal
-    showProgressModal();
-    updateModalProgress(`Scanning ${scanName}...`, 0);
+    // Initialize progress display for a single specific check
+    initProgressList(1);
+    initScanChecklist([scanName]);
+    updateChecklistStatus(scanName, 'running');
+    updateCategoryStatus(scanName, 'running');
 
     try {
         const response = await fetch(`/api/scan/${category}/${scanName}`, {
@@ -177,23 +218,151 @@ async function scanSpecific(category, scanName) {
         if (!response.ok) {
             const errorData = await response.json();
             showStatus('analysisStatus', `Error: ${errorData.error || 'Unknown error'}`, 'error');
+            updateChecklistStatus(scanName, 'error');
+            updateCategoryStatus(scanName, 'error');
             addActivityLog(`❌ ${scanName} failed: ${errorData.error || 'Unknown error'}`, 'error');
-            hideProgressModal();
             return;
         }
 
         const data = await response.json();
         allResults = data;
         displaySingleResult(data);
-        updateModalProgress(`${scanName} completed!`, 100);
-        hideProgressModal();
+        updateChecklistStatus(scanName, 'done');
+        updateCategoryStatus(scanName, 'done');
         addActivityLog(`✓ ${scanName} scan completed successfully`, 'success');
         showStatus('analysisStatus', `✓ ${scanName.toUpperCase()} completed successfully!`, 'success');
     } catch (error) {
         showStatus('analysisStatus', `Error: ${error.message}`, 'error');
+        updateChecklistStatus(scanName, 'error');
+        updateCategoryStatus(scanName, 'error');
         addActivityLog(`❌ ${scanName} error: ${error.message}`, 'error');
-        hideProgressModal();
         console.error('Scan error:', error);
+    }
+}
+
+// Run subdomain scan calling /api/scan-subdomains
+async function runSubdomainScan() {
+    const domainInput = document.getElementById('domainInput').value.trim();
+    if (!domainInput) {
+        showStatus('analysisStatus', 'Please enter a domain', 'error');
+        addActivityLog(`Subdomain Scan attempted but no domain entered.`, 'error');
+        return;
+    }
+
+    addActivityLog(`🚀 Starting subdomain scan on: ${domainInput}`, 'info');
+    showStatus('analysisStatus', `Scanning subdomains for ${domainInput}...`, 'loading');
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('resultsSection').style.display = 'flex';
+    currentAnalysis = { domain: domainInput, category: 'Subdomains', scanId: Date.now() };
+    allResults = { domain: domainInput, category: 'Subdomains' };
+
+    // Initialize progress display for subdomain scan
+    initProgressList(1);
+    initScanChecklist(['subdomains']);
+    updateChecklistStatus('subdomains', 'running');
+    updateCategoryStatus('subdomains', 'running');
+
+    try {
+        const response = await fetch('/api/scan-subdomains', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: domainInput })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            showStatus('analysisStatus', `Error: ${errorData.error || 'Unknown error'}`, 'error');
+            updateChecklistStatus('subdomains', 'error');
+            updateCategoryStatus('subdomains', 'error');
+            addActivityLog(`❌ Subdomain scan failed: ${errorData.error || 'Unknown error'}`, 'error');
+            return;
+        }
+
+        const data = await response.json();
+        Object.assign(allResults, data);
+        
+        displaySubdomainResults(data);
+        updateChecklistStatus('subdomains', 'done');
+        updateCategoryStatus('subdomains', 'done');
+        addActivityLog(`✓ Subdomain scan completed: found ${data.total_found}/${data.total_scanned} subdomains`, 'success');
+        showStatus('analysisStatus', `✓ Subdomain scan completed successfully!`, 'success');
+    } catch (error) {
+        showStatus('analysisStatus', `Error: ${error.message}`, 'error');
+        updateChecklistStatus('subdomains', 'error');
+        updateCategoryStatus('subdomains', 'error');
+        addActivityLog(`❌ Subdomain scan error: ${error.message}`, 'error');
+        console.error('Scan error:', error);
+    }
+}
+
+// Display subdomain scan results
+function displaySubdomainResults(data) {
+    const container = document.getElementById('scanResultsContainer');
+    container.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'category-header';
+    header.innerHTML = `
+        <h2><i data-lucide="search"></i> Subdomain Scan Results</h2>
+        <p class="domain-info">Domain: <strong>${allResults.domain}</strong> | Scanned: <strong>${data.total_scanned}</strong> | Found: <strong>${data.total_found}</strong></p>
+    `;
+    container.appendChild(header);
+
+    const card = createCard('<i data-lucide="target"></i> Found Subdomains');
+    const body = card.querySelector('.result-body') || card;
+    
+    if (data.results && data.results.length > 0) {
+        let tableHtml = `
+            <div class="table-responsive" style="overflow-x: auto;">
+                <table class="subdomains-table" style="width:100%; border-collapse:collapse; margin-top:10px;">
+                    <thead>
+                        <tr style="border-bottom:2px solid var(--border-light); text-align:left;">
+                            <th style="padding:10px; font-family:var(--font-mono); color:var(--accent);">Subdomain</th>
+                            <th style="padding:10px; font-family:var(--font-mono); color:var(--accent);">Origin IP</th>
+                            <th style="padding:10px; font-family:var(--font-mono); color:var(--accent);">SSL Common Name</th>
+                            <th style="padding:10px; font-family:var(--font-mono); color:var(--accent);">SSL Validity (Start - End)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        
+        data.results.forEach(res => {
+            const ssl = res.ssl_info;
+            const commonName = ssl ? ssl['Common Name'] : 'N/A';
+            let validity = 'N/A';
+            if (ssl && ssl['Validity Start'] && ssl['Validity End']) {
+                validity = `${ssl['Validity Start'].split(' ')[0]} to ${ssl['Validity End'].split(' ')[0]}`;
+            }
+            tableHtml += `
+                <tr style="border-bottom:1px solid var(--border-light);">
+                    <td style="padding:10px; font-family:var(--font-mono);"><a href="https://${res.host}" target="_blank" style="color:var(--primary); text-decoration:none;">${res.host}</a></td>
+                    <td style="padding:10px; font-family:var(--font-mono);">${res.ip}</td>
+                    <td style="padding:10px; font-family:var(--font-mono);">${commonName}</td>
+                    <td style="padding:10px; font-family:var(--font-mono); font-size:0.85em; color:var(--fg-muted);">${validity}</td>
+                </tr>
+            `;
+        });
+        
+        tableHtml += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+        body.innerHTML = tableHtml;
+    } else {
+        body.innerHTML = '<p style="color:var(--fg-muted);">No subdomains found in the wordlist scan.</p>';
+    }
+    
+    container.appendChild(card);
+
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn btn-success';
+    exportBtn.innerHTML = '<i data-lucide="download"></i> Export to Excel';
+    exportBtn.onclick = () => exportResults(allResults);
+    container.appendChild(exportBtn);
+
+    if (window.lucide) {
+        lucide.createIcons();
     }
 }
 
@@ -305,14 +474,13 @@ async function runAllScans() {
 }
 
 // Progress UI helpers
-function initProgressList() {
-    const categories = ['infrastructure', 'security', 'technology', 'content', 'performance'];
+function initProgressList(totalCount = 5) {
     // Track progress state
     window.progressState = {
-        total: categories.length * 5, // 5 scans per category
+        total: totalCount,
         completed: 0,
         running: 0,
-        pending: categories.length * 5,
+        pending: totalCount,
         failed: 0
     };
     updateProgressDisplay();
@@ -382,7 +550,7 @@ function displaySingleResult(data) {
     const header = document.createElement('div');
     header.className = 'category-header';
     header.innerHTML = `
-        <h2>🔎 ${data.category || 'Scan'} Result</h2>
+        <h2><i data-lucide="search"></i> ${data.category || 'Scan'} Result</h2>
         <p class="domain-info">Domain: <strong>${data.domain}</strong></p>
     `;
     container.appendChild(header);
@@ -397,9 +565,13 @@ function displaySingleResult(data) {
 
     const exportBtn = document.createElement('button');
     exportBtn.className = 'btn btn-success';
-    exportBtn.textContent = '📥 Export to Excel';
+    exportBtn.innerHTML = '<i data-lucide="download"></i> Export to Excel';
     exportBtn.onclick = () => exportResults(data);
     container.appendChild(exportBtn);
+
+    if (window.lucide) {
+        lucide.createIcons();
+    }
 }
 
 // Display results based on category
@@ -434,27 +606,31 @@ function displayCategoryResults(category, data) {
     // Export button
     const exportBtn = document.createElement('button');
     exportBtn.className = 'btn btn-success';
-    exportBtn.textContent = '📥 Export to Excel';
+    exportBtn.innerHTML = '<i data-lucide="download"></i> Export to Excel';
     exportBtn.onclick = () => exportResults(data);
     container.appendChild(exportBtn);
+
+    if (window.lucide) {
+        lucide.createIcons();
+    }
 }
 
 function getCategoryIcon(category) {
     const icons = {
-        'infrastructure': '🏗️',
-        'security': '🔒',
-        'technology': '⚙️',
-        'content': '📄',
-        'performance': '⚡'
+        'infrastructure': '<i data-lucide="server"></i>',
+        'security': '<i data-lucide="shield"></i>',
+        'technology': '<i data-lucide="cpu"></i>',
+        'content': '<i data-lucide="file-code"></i>',
+        'performance': '<i data-lucide="zap"></i>'
     };
-    return icons[category] || '📊';
+    return icons[category] || '<i data-lucide="bar-chart-2"></i>';
 }
 
 // Display Infrastructure Results
 function displayInfrastructure(data, container) {
     // DNS Records
     if (data['DNS Records']) {
-        const card = createCard('📡 DNS Records');
+        const card = createCard('<i data-lucide="globe"></i> DNS Records');
         const dnsHtml = Object.entries(data['DNS Records']).map(([key, values]) => {
             if (Array.isArray(values) && values.length > 0) {
                 return `<strong>${key}:</strong> ${values.join(', ')}`;
@@ -468,7 +644,7 @@ function displayInfrastructure(data, container) {
 
     // WHOIS Info
     if (data['WHOIS'] && !data['WHOIS'].error) {
-        const card = createCard('📋 WHOIS Information');
+        const card = createCard('<i data-lucide="file-text"></i> WHOIS Information');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['WHOIS']); else card.innerHTML += formatObject(data['WHOIS']);
         container.appendChild(card);
@@ -476,7 +652,7 @@ function displayInfrastructure(data, container) {
 
     // Port Scan
     if (data['Port Scan'] && data['Port Scan']['open_ports']) {
-        const card = createCard('🔓 Open Ports');
+        const card = createCard('<i data-lucide="unlock"></i> Open Ports');
         const ports = data['Port Scan']['open_ports'];
         const body = card.querySelector('.result-body');
         if (ports.length > 0) {
@@ -489,7 +665,7 @@ function displayInfrastructure(data, container) {
 
     // Geolocation
     if (data['Geolocation'] && Object.keys(data['Geolocation']).length > 0) {
-        const card = createCard('📍 Geolocation');
+        const card = createCard('<i data-lucide="map-pin"></i> Geolocation');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['Geolocation']); else card.innerHTML += formatObject(data['Geolocation']);
         container.appendChild(card);
@@ -497,7 +673,7 @@ function displayInfrastructure(data, container) {
 
     // CDN Detection
     if (data['CDN Detection']) {
-        const card = createCard('☁️ CDN Detection');
+        const card = createCard('<i data-lucide="cloud"></i> CDN Detection');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['CDN Detection']); else card.innerHTML += formatObject(data['CDN Detection']);
         container.appendChild(card);
@@ -508,7 +684,7 @@ function displayInfrastructure(data, container) {
 function displaySecurity(data, container) {
     // Security Headers
     if (data['Security Headers']) {
-        const card = createCard('🔒 Security Headers');
+        const card = createCard('<i data-lucide="shield-alert"></i> Security Headers');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['Security Headers']); else card.innerHTML += formatObject(data['Security Headers']);
         container.appendChild(card);
@@ -516,7 +692,7 @@ function displaySecurity(data, container) {
 
     // SSL Certificate
     if (data['SSL Certificate']) {
-        const card = createCard('🔐 SSL Certificate');
+        const card = createCard('<i data-lucide="lock"></i> SSL Certificate');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['SSL Certificate']); else card.innerHTML += formatObject(data['SSL Certificate']);
         container.appendChild(card);
@@ -524,12 +700,12 @@ function displaySecurity(data, container) {
 
     // WAF Detection
     if (data['WAF Detection'] && data['WAF Detection'].length > 0) {
-        const card = createCard('🛡️ WAF Detection');
+        const card = createCard('<i data-lucide="shield-check"></i> WAF Detection');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += data['WAF Detection'].join('<br>'); else card.innerHTML += data['WAF Detection'].join('<br>');
         container.appendChild(card);
     } else if (data['WAF Detection'] && data['WAF Detection'].length === 0) {
-        const card = createCard('🛡️ WAF Detection');
+        const card = createCard('<i data-lucide="shield-check"></i> WAF Detection');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += 'No WAF detected'; else card.innerHTML += 'No WAF detected';
         container.appendChild(card);
@@ -537,7 +713,7 @@ function displaySecurity(data, container) {
 
     // Email Security
     if (data['Email Security']) {
-        const card = createCard('📧 Email Security (SPF/DKIM/DMARC)');
+        const card = createCard('<i data-lucide="mail"></i> Email Security (SPF/DKIM/DMARC)');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['Email Security']); else card.innerHTML += formatObject(data['Email Security']);
         container.appendChild(card);
@@ -545,7 +721,7 @@ function displaySecurity(data, container) {
 
     // HTTP Security
     if (data['HTTP Security']) {
-        const card = createCard('🔐 HTTP Security Configuration');
+        const card = createCard('<i data-lucide="globe"></i> HTTP Security Configuration');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['HTTP Security']); else card.innerHTML += formatObject(data['HTTP Security']);
         container.appendChild(card);
@@ -556,7 +732,7 @@ function displaySecurity(data, container) {
 function displayTechnology(data, container) {
     // Detected Technologies
     if (data['Detected Technologies']) {
-        const card = createCard('⚙️ Detected Technologies');
+        const card = createCard('<i data-lucide="settings"></i> Detected Technologies');
         const body = card.querySelector('.result-body');
         if (Array.isArray(data['Detected Technologies']) && data['Detected Technologies'].length > 0) {
             if (body) body.innerHTML += data['Detected Technologies'].join('<br>'); else card.innerHTML += data['Detected Technologies'].join('<br>');
@@ -568,7 +744,7 @@ function displayTechnology(data, container) {
 
     // Framework Versions
     if (data['Framework Versions']) {
-        const card = createCard('📦 Framework Versions');
+        const card = createCard('<i data-lucide="box"></i> Framework Versions');
         const body = card.querySelector('.result-body');
         if (Object.keys(data['Framework Versions']).length > 0) {
             if (body) body.innerHTML += formatObject(data['Framework Versions']); else card.innerHTML += formatObject(data['Framework Versions']);
@@ -580,7 +756,7 @@ function displayTechnology(data, container) {
 
     // Metadata
     if (data['Metadata']) {
-        const card = createCard('📝 Page Metadata');
+        const card = createCard('<i data-lucide="code"></i> Page Metadata');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['Metadata']); else card.innerHTML += formatObject(data['Metadata']);
         container.appendChild(card);
@@ -588,7 +764,7 @@ function displayTechnology(data, container) {
 
     // HTTP Methods
     if (data['HTTP Methods']) {
-        const card = createCard('🌐 HTTP Methods');
+        const card = createCard('<i data-lucide="chevrons-right"></i> HTTP Methods');
         const methods = Object.entries(data['HTTP Methods'])
             .map(([method, info]) => `<strong>${method}:</strong> ${info.status}`)
             .join('<br>');
@@ -602,7 +778,7 @@ function displayTechnology(data, container) {
 function displayContent(data, container) {
     // Links
     if (data['Links']) {
-        const card = createCard('🔗 Links');
+        const card = createCard('<i data-lucide="link"></i> Links');
         const linksInfo = `Internal: ${data['Links']['internal_count']}<br>External: ${data['Links']['external_count']}`;
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += linksInfo; else card.innerHTML += linksInfo;
@@ -614,7 +790,7 @@ function displayContent(data, container) {
 
     // Common Paths
     if (data['Common Paths']) {
-        const card = createCard('📁 Common Paths Found');
+        const card = createCard('<i data-lucide="folder"></i> Common Paths Found');
         const body = card.querySelector('.result-body');
         if (Array.isArray(data['Common Paths']) && data['Common Paths'].length > 0) {
             const html = data['Common Paths'].map(p => `<strong>${p.path}:</strong> ${p.status}`).join('<br>');
@@ -627,7 +803,7 @@ function displayContent(data, container) {
 
     // Robots.txt
     if (data['Robots.txt']) {
-        const card = createCard('🤖 Robots.txt');
+        const card = createCard('<i data-lucide="bot"></i> Robots.txt');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['Robots.txt']) || 'No robots.txt found'; else card.innerHTML += formatObject(data['Robots.txt']) || 'No robots.txt found';
         container.appendChild(card);
@@ -635,7 +811,7 @@ function displayContent(data, container) {
 
     // Sitemap
     if (data['Sitemap.xml']) {
-        const card = createCard('🗺️ Sitemap.xml');
+        const card = createCard('<i data-lucide="map"></i> Sitemap.xml');
         const sitemapInfo = `URLs found: ${data['Sitemap.xml']['count']}`;
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += sitemapInfo; else card.innerHTML += sitemapInfo;
@@ -647,7 +823,7 @@ function displayContent(data, container) {
 
     // Secrets & Comments
     if (data['Secrets & Comments']) {
-        const card = createCard('🔓 Secrets & Comments');
+        const card = createCard('<i data-lucide="eye-off"></i> Secrets & Comments');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['Secrets & Comments']); else card.innerHTML += formatObject(data['Secrets & Comments']);
         container.appendChild(card);
@@ -658,7 +834,7 @@ function displayContent(data, container) {
 function displayPerformance(data, container) {
     // Response Timing
     if (data['Response Timing']) {
-        const card = createCard('⏱️ Response Timing');
+        const card = createCard('<i data-lucide="clock"></i> Response Timing');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['Response Timing']); else card.innerHTML += formatObject(data['Response Timing']);
         container.appendChild(card);
@@ -666,7 +842,7 @@ function displayPerformance(data, container) {
 
     // Cookies
     if (data['Cookies']) {
-        const card = createCard('🍪 Cookies');
+        const card = createCard('<i data-lucide="cookie"></i> Cookies');
         const body = card.querySelector('.result-body');
         if (Object.keys(data['Cookies']).length > 0) {
             if (body) body.innerHTML += formatObject(data['Cookies']); else card.innerHTML += formatObject(data['Cookies']);
@@ -678,7 +854,7 @@ function displayPerformance(data, container) {
 
     // DNS Propagation
     if (data['DNS Propagation']) {
-        const card = createCard('🌍 DNS Propagation');
+        const card = createCard('<i data-lucide="activity"></i> DNS Propagation');
         const body = card.querySelector('.result-body');
         if (body) body.innerHTML += formatObject(data['DNS Propagation']); else card.innerHTML += formatObject(data['DNS Propagation']);
         container.appendChild(card);
@@ -843,10 +1019,13 @@ function exportResults(data) {
         ];
         
         // Add stats if available
-        if (data.results) {
+        if (data.results && !Array.isArray(data.results)) {
             Object.entries(data.results).forEach(([cat, result]) => {
                 summarySheet.push([cat, result.domain || 'N/A']);
             });
+        } else if (data.category === 'Subdomains') {
+            summarySheet.push(['Total Scanned', data.total_scanned || 0]);
+            summarySheet.push(['Total Found', data.total_found || 0]);
         }
         
         // Create detailed data sheets
@@ -854,12 +1033,36 @@ function exportResults(data) {
         sheets['Summary'] = XLSX.utils.aoa_to_sheet(summarySheet);
         
         // Add category sheets
-        if (data.results) {
+        if (data.results && !Array.isArray(data.results)) {
             Object.entries(data.results).forEach(([category, categoryData]) => {
                 const categorySheet = createCategorySheet(category, categoryData);
                 const sheetName = category.substring(0, 30); // Excel sheet name limit
                 sheets[sheetName] = XLSX.utils.aoa_to_sheet(categorySheet);
             });
+        } else if (data.category === 'Subdomains' || Array.isArray(data.results)) {
+            // Subdomains specific sheet layout
+            const subSheet = [
+                ['SUBDOMAIN SCAN RESULTS'],
+                [],
+                ['Domain', data.domain || 'N/A'],
+                ['Total Scanned', data.total_scanned || 0],
+                ['Total Found', data.total_found || 0],
+                [],
+                ['Subdomain', 'IP Address', 'SSL Common Name', 'SSL Validity Start', 'SSL Validity End']
+            ];
+            
+            const records = Array.isArray(data.results) ? data.results : (data.results ? Object.values(data.results) : []);
+            records.forEach(res => {
+                const ssl = res.ssl_info || {};
+                subSheet.push([
+                    res.host,
+                    res.ip,
+                    ssl['Common Name'] || 'N/A',
+                    ssl['Validity Start'] || 'N/A',
+                    ssl['Validity End'] || 'N/A'
+                ]);
+            });
+            sheets['Subdomains'] = XLSX.utils.aoa_to_sheet(subSheet);
         } else {
             // Single result mode
             const detailedSheet = createDetailedDataSheet(data);
@@ -1017,55 +1220,19 @@ function flattenDataForExcel(data) {
 let progressStartTime = null;
 let progressTimer = null;
 
-function showProgressModal() {
-    const modal = document.getElementById('progressModal');
-    if (modal) {
-        modal.style.display = 'flex';
-        progressStartTime = Date.now();
-        updateProgressTimer();
-        progressTimer = setInterval(updateProgressTimer, 1000);
-    }
-}
-
-function hideProgressModal() {
-    const modal = document.getElementById('progressModal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-    if (progressTimer) {
-        clearInterval(progressTimer);
-        progressTimer = null;
-    }
-}
-
-function updateProgressTimer() {
-    if (!progressStartTime) return;
-    const elapsed = Math.floor((Date.now() - progressStartTime) / 1000);
-    const timeEl = document.getElementById('scanTimeElapsed');
-    if (timeEl) {
-        timeEl.textContent = elapsed + 's';
-    }
-}
-
-function updateModalProgress(message, percentage = null) {
-    const msgEl = document.getElementById('progressMessage');
-    if (msgEl) msgEl.textContent = message;
-    
-    if (percentage !== null) {
-        const bar = document.getElementById('modalProgressBar');
-        if (bar) {
-            bar.style.width = percentage + '%';
-        }
-    }
-}
+function showProgressModal() {}
+function hideProgressModal() {}
+function updateProgressTimer() {}
+function updateModalProgress(message, percentage = null) {}
 
 // Show status message
 function showStatus(elementId, message, type) {
     const element = document.getElementById(elementId);
     if (!element) return;
-    element.textContent = message;
+    
+    let cleanMessage = message.replace(/[🚀❌✓✗⏳]/g, '').trim();
+    element.textContent = cleanMessage;
     element.className = `status-message show ${type}`;
-    // Ensure screen readers get updates
     element.setAttribute('role', 'status');
     element.setAttribute('aria-live', 'polite');
 }
@@ -1081,5 +1248,6 @@ function resetAnalysis() {
     currentAnalysis = null;
     hideProgressModal();
     initScanChecklist();
+    initProgressList();
     addActivityLog('Analysis cleared. Ready for new scan.', 'info');
 }
